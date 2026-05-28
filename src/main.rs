@@ -1,4 +1,4 @@
-use rand::{RngExt, rngs::ThreadRng};
+use std::collections::HashMap;
 use tiny_skia::*;
 use voronoice::{self, BoundingBox, Point, VoronoiBuilder, VoronoiCell};
 
@@ -34,10 +34,9 @@ fn main() {
         Point{x:2720., y:3400.},
         Point{x:3400., y:3400.},
     ];
-    let mut rng = rand::rng();
     for p in points.iter_mut() {
-        p.x = p.x + produce_modifier(&mut rng);
-        p.y = p.y + produce_modifier(&mut rng);
+        p.x = p.x + produce_modifier();
+        p.y = p.y + produce_modifier();
     }
     let mirrored = 
         points.iter()
@@ -50,11 +49,13 @@ fn main() {
         .set_lloyd_relaxation_iterations(0)
         .build()
         .unwrap();
-    let mut continents: Vec<Point> = vec![];
-    for _i in 0..7+rand::random_range(0..3) {
-        continents.push(points[rand::random_range(0..points.len())].clone())
-    }
+    let neighbors = find_neighbors(&diagram);
+    let continents = pick_continents(points, neighbors);
 
+    save_image(diagram, continents);
+}
+
+fn save_image(diagram: voronoice::Voronoi, continents: Vec<Point>) {
     println!("Generating image");
     let mut stroke_color = Paint::default();
     stroke_color.set_color_rgba8(0, 0, 0, 255);
@@ -88,8 +89,48 @@ fn main() {
     }
 }
 
-fn produce_modifier(rng:&mut ThreadRng) -> f64 {
-    f64::floor(rng.random_range(-300.0 .. 300.))
+fn find_neighbors(diagram: &voronoice::Voronoi) -> HashMap<(i32, i32), Vec<Point>> {
+    let mut neighbors : HashMap<(i32,i32), Vec<Point>> = HashMap::new();
+    for c in diagram.iter_cells() {
+        let cell = canonical(c.site_position()); 
+        let key = (cell.x.floor() as i32, cell.y.floor() as i32);
+        for n in c.iter_neighbors() {
+            let neighbor = diagram.cell(n);
+            let p = canonical(neighbor.site_position());
+            match neighbors.get_mut(&key) {
+                Some (points) =>
+                    points.push(p),
+                None => {neighbors.insert(key, vec![p]);}
+            }
+        }
+    }
+    neighbors
+}
+
+fn pick_continents(points: Vec<Point>, neighbors: HashMap<(i32, i32), Vec<Point>>) -> Vec<Point> {
+    let start = points[rand::random_range(0..points.len())].clone();
+    let mut continents: Vec<Point> = vec![start.clone()];
+    let mut exclude = neighbors.get(&(start.x as i32, start.y as i32)).unwrap().clone();
+    let num_continents = rand::random_range(7..11);
+    while continents.len() < num_continents {
+        let alltargets = points.iter().filter(|p| !continents.contains(p)).collect::<Vec<_>>();
+        let targets = points.iter().filter(|p| !(continents.contains(p) || exclude.contains(p))).collect::<Vec<_>>();
+        println!("Valid targets: {:?}", targets);
+        if targets.is_empty() {
+            let p = alltargets[rand::random_range(0..alltargets.len())].clone();
+            continents.push(p);
+        } else {
+            let p = targets[rand::random_range(0..targets.len())].clone();
+            let mut n = neighbors.get(&(p.x as i32, p.y as i32)).unwrap().clone();
+            exclude.append(&mut n);
+            continents.push(p);
+        }
+    }
+    continents
+}
+
+fn produce_modifier() -> f64 {
+    f64::floor(rand::random_range(-300.0 .. 300.))
 }
 
 fn mirror_points(p:&Point) -> Vec<Point> {
