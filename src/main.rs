@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use tiny_skia::*;
+use noise::{Fbm, NoiseFn, Simplex, Vector2};
+use image::{Rgb, RgbImage};
 use voronoice::{self, BoundingBox, Point, VoronoiBuilder, VoronoiCell};
 
 fn main() {
@@ -51,8 +53,66 @@ fn main() {
         .unwrap();
     let neighbors = find_neighbors(&diagram);
     let continents = pick_continents(points, neighbors);
-
+    let d2 =
+        diagram.iter_cells()
+        .map(|c| {
+            let can = canonical(c.site_position());
+            to_cell(c, continents.contains(&can))
+        }).collect::<Vec<_>>();
+    draw_image(d2);
     save_image(diagram, continents);
+}
+
+
+fn warp_domain(noise: &Fbm<Simplex>, p: Vector2<f64>) -> Vector2<f64> {
+    let offset_x = noise.get([p.x, p.y]);
+    let offset_y = noise.get([p.x+ 5.2, p.y + 1.3]);
+    Vector2 {
+        x: p.x + offset_x,
+        y: p.y + offset_y
+    }
+}
+
+#[derive(Debug)]
+struct Cell {
+    site: Vector2<f64>,
+    continent: bool,
+}
+
+fn to_cell(cell: VoronoiCell, continent: bool) -> Cell {
+    let site = cell.site_position();
+    Cell {
+        site: Vector2 {
+            x: 6. * site.x as f64 / 4096.,
+            y: 6. * site.y as f64 / 4096.,
+        },
+        continent
+    }
+}
+
+fn distance_sq(a:Vector2<f64>, b: Vector2<f64>) -> f64 {
+    (a.x - b.x).abs() + (a.y - b.y).abs()
+}
+
+fn draw_image(diagram: Vec<Cell>) {
+    let noise: Fbm<Simplex> = Fbm::new(0);
+    println!("Starting to draw noise");
+    let image = RgbImage::from_fn(4096, 4096, |x,y| {
+        println!("handling: {} {}", x, y);
+        let x = 6. * x as f64 / 4096.;
+        let y = 6. * y as f64 / 4096.;
+        let warped = warp_domain(&noise, Vector2{x,y});
+        let cell = diagram.iter().min_by(|a, b| {
+            f64::total_cmp(&distance_sq(warped, a.site), &distance_sq(warped, b.site))
+        }).unwrap();
+        if cell.continent {
+            Rgb([100, 200, 60])
+        } else {
+            Rgb([60, 100, 200])
+        }
+    });
+    println!("Saving noise");
+    image.save("test2.png").expect("Image to save");
 }
 
 fn save_image(diagram: voronoice::Voronoi, continents: Vec<Point>) {
@@ -115,6 +175,7 @@ fn pick_continents(points: Vec<Point>, neighbors: HashMap<(i32, i32), Vec<Point>
     while continents.len() < num_continents {
         let alltargets = points.iter().filter(|p| !continents.contains(p)).collect::<Vec<_>>();
         let targets = points.iter().filter(|p| !(continents.contains(p) || exclude.contains(p))).collect::<Vec<_>>();
+        println!("Excluding {:?}", exclude);
         println!("Valid targets: {:?}", targets);
         if targets.is_empty() {
             let p = alltargets[rand::random_range(0..alltargets.len())].clone();
