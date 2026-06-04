@@ -11,7 +11,10 @@ pub struct NoiseConfig {
     pub width: f64,
     pub height: f64,
     pub scale: f64,
-    pub seed: u32
+    pub seed: u32,
+    pub lacunatiy: f64,
+    pub gain: f64,
+    pub octaves: u8
 }
 pub struct ToroidNoise {
     noise_dx: Simplex,
@@ -20,24 +23,45 @@ pub struct ToroidNoise {
     height: f64,
     frequency: f64,
     scale: f64,
+    lacunatiy: f64,
+    gain: f64,
+    octaves: u8
 }
 
 impl ToroidNoise {
     pub fn new(config: NoiseConfig) -> Self {
         let noise_dx = Simplex::new(config.seed);
         let noise_dy = Simplex::new(config.seed+1);
-        ToroidNoise { noise_dx, noise_dy, width:config.width, height:config.height, frequency:config.frequency, scale:config.scale }
+        ToroidNoise { 
+            noise_dx, 
+            noise_dy, 
+            width:config.width, 
+            height:config.height, 
+            frequency:config.frequency, 
+            scale:config.scale,
+            lacunatiy: config.lacunatiy,
+            gain: config.gain,
+            octaves: config.octaves
+        }
     }
 
-    fn sample(&self, noise: &Simplex, x: f64, y: f64) -> f64 {
-        let ax = (x/self.width) * TAU * self.frequency;
-        let ay = (y/self.height) * TAU * self.frequency;
-        noise.get([ax.cos(), ax.sin(), ay.cos(), ay.sin()])
+    fn sample(&self, noise: &Simplex, x: f64, y: f64, frequency: f64, amplitude: f64) -> f64 {
+        let ax = (x/self.width) * TAU * frequency;
+        let ay = (y/self.height) * TAU * frequency;
+        noise.get([ax.cos(), ax.sin(), ay.cos(), ay.sin()]) * amplitude
     }
 
     pub fn warp(&self, x: f64, y:f64) -> Vector {
-        let dx = self.sample(&self.noise_dx, x, y) * self.scale;
-        let dy = self.sample(&self.noise_dy, x, y) * self.scale;
+        let mut frequency = self.frequency;
+        let mut amplitude = self.scale;
+        let mut dx = 0.;
+        let mut dy = 0.;
+        for _ in 0..self.octaves {
+            dx += self.sample(&self.noise_dx, x, y, frequency, amplitude);
+            dy += self.sample(&self.noise_dy, x, y, frequency, amplitude);
+            frequency *= self.lacunatiy;
+            amplitude *= self.gain;
+        }
         Vector{x:x+dx, y:y+dy}
     }
 }
@@ -113,7 +137,7 @@ impl ToroidTectonics {
         println!("mirror length: {:?}", mirrors.len());
         let diagram = 
             voronoice::VoronoiBuilder::default()
-            .set_sites(mirrors.clone())
+            .set_sites(mirrors)
             .set_lloyd_relaxation_iterations(0)
             .set_bounding_box(BoundingBox::new(Point{
                 x:config.width/2., 
@@ -149,7 +173,11 @@ impl ToroidTectonics {
             }
         }).collect();
         let type_ = plate_type(&mut rng, &sites, &neighbors);
-        ToroidTectonics { sites, mirrors, neighbors, edges: vec![], motion, type_, width: config.width}
+        ToroidTectonics { 
+            sites, 
+            mirrors:
+                diagram.iter_cells().map(|c| c.site_position().clone()).collect()
+            , neighbors, edges: vec![], motion, type_, width: config.width}
     }
 
     pub fn get_color_at(&self, warp: &ToroidNoise, x: f64, y: f64) -> [u8;3] {

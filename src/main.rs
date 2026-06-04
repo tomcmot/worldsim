@@ -14,8 +14,12 @@ fn main() {
         width: 2048.,
         height: 2048.,
         frequency: 1.,
-        scale: 512.,
-        seed: 0
+        scale: 256.,
+        seed: 0,
+        lacunatiy: 2.,
+        gain: 0.5,
+        octaves: 8
+
     });
     draw(tectonics, warp)
 }
